@@ -1,116 +1,111 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+const path = require("path");
 
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
+interface PluginSettings {
+	llmModel: string;
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+const DEFAULT_SETTINGS: PluginSettings = {
+	llmModel: 'llama3'
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export default class RagLLmBotPlugin extends Plugin {
+	settings: PluginSettings;
 
 	async onload() {
+		console.log('RagLLmBotPlugin.onload');
 		await this.loadSettings();
-
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (_evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
 
 		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, _view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
+			id: 'create-learning-questions',
+			name: 'Create an Example Exam',
+			callback: async () => {
+				new PromptEngineeringModal(this.app, async (userPrompt) => {
+					const activeFile = this.app.workspace.getActiveFile();
+					if (!activeFile) {
+						new Notice("No active file selected. Please select one");
+						return;
 					}
+					const folderPath = path.dirname(activeFile.path);
+					const vault = this.app.vault;
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
+					const now = new Date();
+					const date = now.toISOString().split("T")[0]; // yyyy-mm-dd
+					const time = now
+						.toTimeString()
+						.split(" ")[0]
+						.replace(/:/g, "_"); // hh_mm_ss → we'll keep hh_mm
+
+					const filename = `${folderPath}/Testexam_${date}_${time.slice(0, 5)}.md`;
+					const fileContent = `# Testing your knowledge with a few Questions...`
+					const newFile = await vault.create(filename, fileContent);
+					new Notice("Created Example Exam");
+					await this.app.workspace.openLinkText(newFile.path, "", true);
+				}).open();
 			}
-		});
+		})
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		// This adds a settings tab so the user can configure some aspects of the plugin
+		this.addSettingTab(new RagLlmBotSettingTab(this.app, this));
 	}
 
 	onunload() {
-
+		console.log('RagLLmBotPlugin.onunload');
 	}
 
 	async loadSettings() {
+		console.log('RagLLmBotPlugin.loadSettings');
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 	}
 
 	async saveSettings() {
+		console.log('RagLLmBotPlugin.saveSettings');
 		await this.saveData(this.settings);
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
+class PromptEngineeringModal extends Modal {
+	constructor(app: App, onSubmit: (result: string) => void) {
 		super(app);
+		this.setTitle("Additional Details");
+		this.setContent("You can add additional details, that will be added to the prompt for the llm! The currently selected file and its directory will be automatically be added as context.");
+		let userPrompt = '';
+		new Setting(this.contentEl)
+			.addTextArea((text) => {
+				text.inputEl.style.width = '100%';
+				text.inputEl.style.boxSizing = 'border-box';
+				text.inputEl.style.minHeight = '120px';
+				text.setPlaceholder("Your extra details...")
+				text.onChange((value) => {
+					userPrompt = value;
+				});
+			});
+		const lastSetting = this.contentEl.querySelector(".setting-item:last-child") as HTMLElement;
+		if (lastSetting) {
+			lastSetting.style.flexDirection = "column";
+			lastSetting.style.alignItems = "stretch";
+		}
+		new Setting(this.contentEl)
+			.addButton((btn) =>
+			btn.setButtonText('Submit')
+				.setCta()
+				.onClick(() => {
+					console.log('PromptEngineeringModal.onSubmit');
+					this.close();
+					onSubmit(userPrompt);
+				}));
 	}
 
 	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
+		console.log('PromptEngineeringModal.onOpen');
 	}
 }
 
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+class RagLlmBotSettingTab extends PluginSettingTab {
+	plugin: RagLLmBotPlugin;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: RagLLmBotPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -121,13 +116,13 @@ class SampleSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
+			.setName('LLM Model')
+			.setDesc('Set LLM Model used by Ollama in the Background')
 			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
+				.setPlaceholder('Enter a Model')
+				.setValue(this.plugin.settings.llmModel)
 				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
+					this.plugin.settings.llmModel = value;
 					await this.plugin.saveSettings();
 				}));
 	}
