@@ -1,6 +1,6 @@
 {
-	"id": "rag-llm-chatbot",
-	"name": "RAG LLM Chatbot",
+	"id": "rag-llm-bot",
+	"name": "RAG LLM Bot",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
 	"description": "Demonstrates some of the capabilities of the Obsidian API.",
