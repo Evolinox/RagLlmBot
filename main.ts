@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import {App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile} from 'obsidian';
 const fs = require("fs");
 const path = require("path");
 import { PDFParse } from 'pdf-parse';
@@ -7,6 +7,7 @@ interface PluginSettings {
 	llmModel: string;
 	embeddingModel: string;
 	basePrompt: string;
+	topK: number;
 	chromaBaseUrl: string;
 	chromaTenantName: string;
 	chromaDatabaseName: string;
@@ -18,6 +19,7 @@ const DEFAULT_SETTINGS: PluginSettings = {
 	llmModel: 'llama3.1',
 	embeddingModel: 'qwen3-embedding',
 	basePrompt: "You are an AI tutor. Based on the following material, generate a bunch of concise learning questions formatted in Markdown. Add the right solutions to an extra chapter at the bottom. All Questions should be answered only with the given material, don't ask, what may be in mentioned sources.",
+	topK: 5,
 	chromaBaseUrl: "http://localhost:9000",
 	chromaTenantName: "obsidian_ragllmbot",
 	chromaDatabaseName: "obsidian_db",
@@ -39,6 +41,7 @@ export default class RagLLmBotPlugin extends Plugin {
 			name: 'Create an Example Exam',
 			callback: async () => {
 				new PromptEngineeringModal(this.app, async (userPrompt) => {
+					const start = performance.now();
 					const activeFile = this.app.workspace.getActiveFile();
 					if (!activeFile) {
 						new Notice("No active file selected. Please select one");
@@ -85,6 +88,12 @@ export default class RagLLmBotPlugin extends Plugin {
 					const filename = `${folderPath}/RagLlmLearning_${date}_${time.slice(0, 5)}.md`;
 					const fileContent = `
 ---
+
+**LLM Modell:** ${this.settings.llmModel}
+
+**Embedding Modell:** ${this.settings.embeddingModel}
+
+**Duration:** 0 s
 
 **Prompt:** ${this.settings.basePrompt}
 
@@ -138,7 +147,7 @@ export default class RagLLmBotPlugin extends Plugin {
 						"POST",
 						`/api/v2/tenants/${this.settings.chromaTenantName}/databases/${this.settings.chromaDatabaseName}/collections/${this.settings.chromaCollectionId}/query`,
 						{
-							n_results: 5, // number of chunks to retrieve
+							n_results: this.settings.topK, // number of chunks to retrieve
 							query_embeddings: [userEmbedding]
 						}
 					);
@@ -187,6 +196,9 @@ ${contextText}
 							}
 						}
 					}
+					const end = performance.now();
+					const durationMs = end - start;
+					await this.updateResponseTime(newFile.path, durationMs);
 				}).open();
 			}
 		})
@@ -343,6 +355,22 @@ ${contextText}
 		}
 		return chunks;
 	}
+
+	async updateResponseTime(filePath: string, finalTime: number) {
+		const vault = this.app.vault;
+		const file = vault.getAbstractFileByPath(filePath);
+
+		if (file instanceof TFile) {
+			let content = await vault.read(file);
+
+			const seconds = Math.floor(finalTime / 1000);
+			const ms = Math.floor(finalTime % 1000 / 100);
+
+			const updated = content.replace(`**Duration:** 0 s`,`**Duration:** ${seconds},${ms} s`);
+
+			await vault.modify(file, updated);
+		}
+	}
 }
 
 class PromptEngineeringModal extends Modal {
@@ -423,6 +451,31 @@ class RagLlmBotSettingTab extends PluginSettingTab {
 					this.plugin.settings.embeddingModel = value;
 					await this.plugin.saveSettings();
 				}));
+		new Setting(containerEl)
+			.setName('Top k Chunks')
+			.setDesc('Set the number of Chunks, that should be retrieved from ChromaDB')
+			.addExtraButton((btn) => {
+				btn.setIcon("reset")
+					.setTooltip("Reset to default value")
+					.onClick(async () => {
+						this.plugin.settings.topK = 5;
+						await this.plugin.saveSettings();
+						this.display();
+					})
+			})
+			.addSlider(slider => {
+				slider.setLimits(1, 32, 1)
+					.setValue(this.plugin.settings.topK);
+				const label = document.createElement("span");
+				label.textContent = String(this.plugin.settings.topK);
+				label.style.marginLeft = "10px";
+				slider.sliderEl.parentElement?.appendChild(label);
+				slider.onChange(async (value) => {
+					this.plugin.settings.topK = value;
+					await this.plugin.saveSettings();
+					this.display();
+				})
+			})
 		new Setting(containerEl)
 			.setName('ChromaDB URL')
 			.setDesc('Set URL for ChromaDB')
